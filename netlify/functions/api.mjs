@@ -1,4 +1,4 @@
-import {getStore} from "@netlify/blobs";
+import {getStore,connectLambda} from "@netlify/blobs";
 import crypto from "node:crypto";
 const db=()=>getStore("nova");
 const SECRET=()=>process.env.JWT_SECRET||"";
@@ -12,7 +12,7 @@ const put=(k,v)=>db().setJSON(k,v);
 const isAdmin=e=>!!process.env.ADMIN_EMAIL&&e===process.env.ADMIN_EMAIL.trim().toLowerCase();
 const hash=(pw,salt)=>crypto.scryptSync(pw,salt,64).toString("hex");
 const live=l=>!l.revoked&&l.activatedBy&&(!l.expiresAt||l.expiresAt>Date.now());
-export default async(req)=>{
+const core=async(req)=>{
   const path=new URL(req.url).pathname.replace(/^\/(?:\.netlify\/functions\/api|api)\/?/,"");
   if(path==="ping")return J({ok:true,jwt:!!SECRET(),admin:!!process.env.ADMIN_EMAIL});
   if(!SECRET())return J({error:"Server is missing JWT_SECRET"},500);
@@ -85,4 +85,12 @@ export default async(req)=>{
     return J({error:"Not found"},404);
   }catch(err){return J({error:"Server error: "+(err&&err.message||"unknown")},500)}
 };
+export default core;
 export const config={path:"/api/*"};
+export const handler=async(event)=>{
+  try{connectLambda(event)}catch(e){}
+  const m=event.httpMethod||"GET",nb=m==="GET"||m==="HEAD";
+  const body=nb||!event.body?undefined:(event.isBase64Encoded?Buffer.from(event.body,"base64"):event.body);
+  const res=await core(new Request("https://x"+(event.path||"/"),{method:m,headers:event.headers||{},body}));
+  return {statusCode:res.status,headers:{"Content-Type":"application/json"},body:await res.text()};
+};
